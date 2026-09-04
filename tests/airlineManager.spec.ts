@@ -4,11 +4,16 @@ import { FuelUtils } from '../utils/fuel.utils';
 import { CampaignUtils } from '../utils/campaign.utils';
 import { FleetUtils } from '../utils/fleet.utils';
 import { MaintenanceUtils } from '../utils/maintenance.utils';
+import { DiscordUtils, RunStats } from '../utils/discord.utils';
 
 require('dotenv').config();
 
 test('All Operations', async ({ page }) => {
-  test.setTimeout(60000);
+  // Large fleets can need hundreds of depart-loop iterations (20 planes per
+  // click, ~1.5s per click), across 3 sweeps in this run. 20 minutes gives
+  // headroom for a several-thousand-plane airline; tune down if your fleet
+  // is small and you'd rather fail fast.
+  test.setTimeout(20 * 60 * 1000);
 
   // Variable Initialization
   const fuelUtils = new FuelUtils(page);
@@ -16,47 +21,93 @@ test('All Operations', async ({ page }) => {
   const campaignUtils = new CampaignUtils(page);
   const fleetUtils = new FleetUtils(page);
   const maintenanceUtils = new MaintenanceUtils(page);
+  const discordUtils = new DiscordUtils();
   // End //
 
-  // Login //
-  await generalUtils.login(page);
+  const startTime = Date.now();
 
-  // Fuel Operations //
-  await page.locator('#mapMaint > img').first().click();
-  await fuelUtils.buyFuel();
+  const stats: RunStats = {
+    departBatches: 0,
+    fuelBought: null,
+    co2Bought: null,
+    ecoFriendlyCreated: false,
+    reputationCreated: false,
+    planesChecked: false,
+    planesRepaired: false,
+    durationMs: 0,
+  };
 
-  await page.getByRole('button', { name: ' Co2' }).click();
-  await GeneralUtils.sleep(1000);
-  await fuelUtils.buyCo2();
+  // Opens the routes screen, departs everything currently ready, then closes
+  // the popup again. Called at several points below so planes that finish
+  // loading/refueling partway through the run still get departed, rather
+  // than only catching whatever's ready at the very end.
+  const departSweep = async () => {
+    console.log('Sweeping routes screen for planes to depart...');
 
-  await page.locator('#popup > .modal-dialog > .modal-content > .modal-header > div > .glyphicons').click();
-  // End //
+    await page.locator('#mapRoutes').getByRole('img').click();
+    await GeneralUtils.sleep(2500);
 
-  // Campaign Operations //
-  await page.locator('div:nth-child(5) > #mapMaint > img').click();
-  await campaignUtils.createCampaign();
+    stats.departBatches += await fleetUtils.departPlanes();
 
-  await page.locator('#popup > .modal-dialog > .modal-content > .modal-header > div > .glyphicons').click();
-  await GeneralUtils.sleep(1000)
-  // End //
+    await generalUtils.closePopup();
+    await GeneralUtils.sleep(500);
+  };
 
-  // Repair Planes if needed //
-  await page.locator('div:nth-child(4) > #mapMaint > img').click();
-  
-  await maintenanceUtils.checkPlanes();
-  await GeneralUtils.sleep(1000);
-  await maintenanceUtils.repairPlanes();
-  await GeneralUtils.sleep(1000);
+  try {
+    // Login //
+    await generalUtils.login(page);
+    // End //
 
-  await page.locator('#popup > .modal-dialog > .modal-content > .modal-header > div > .glyphicons').click();
-  // End //
+    // Depart Planes Operations (early pass) //
+    await departSweep();
+    // End //
 
-  // Depart Planes Operations //
-  await page.locator('#mapRoutes').getByRole('img').click();
-  await GeneralUtils.sleep(2500);
+    // Fuel Operations //
+    await page.locator('#mapMaint > img').first().click();
+    stats.fuelBought = await fuelUtils.buyFuel();
 
-  await fleetUtils.departPlanes();
-  // End //
+    await page.getByRole('button', { name: ' Co2' }).click();
+    await GeneralUtils.sleep(1000);
+    stats.co2Bought = await fuelUtils.buyCo2();
 
-  page.close();
+    await generalUtils.closePopup();
+    // End //
+
+    // Campaign Operations //
+    await page.locator('div:nth-child(5) > #mapMaint > img').click();
+    const campaignResult = await campaignUtils.createCampaign();
+    stats.ecoFriendlyCreated = campaignResult.ecoFriendlyCreated;
+    stats.reputationCreated = campaignResult.reputationCreated;
+
+    await generalUtils.closePopup();
+    await GeneralUtils.sleep(1000)
+    // End //
+
+    // Depart Planes Operations (mid-run pass) //
+    await departSweep();
+    // End //
+
+    // Repair Planes if needed //
+    await page.locator('div:nth-child(4) > #mapMaint > img').click();
+
+    stats.planesChecked = await maintenanceUtils.checkPlanes();
+    await GeneralUtils.sleep(1000);
+    stats.planesRepaired = await maintenanceUtils.repairPlanes();
+    await GeneralUtils.sleep(1000);
+
+    await generalUtils.closePopup();
+    // End //
+
+    // Depart Planes Operations (final pass) //
+    await departSweep();
+    // End //
+
+    stats.durationMs = Date.now() - startTime;
+    await discordUtils.sendSuccessReport(stats);
+  } catch (error) {
+    await discordUtils.sendFailureReport(error);
+    throw error; // Still fail the Playwright test/CI job as normal.
+  } finally {
+    await page.close();
+  }
 });
