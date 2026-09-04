@@ -34,4 +34,8 @@ export class GeneralUtils {
 
         console.log('Logged in successfully!');
     }
-}
+
+    public async closePopup() {
+        await this.page.locator('#popup .modal-header .glyphicons').click();
+    }
+}}
