@@ -2,7 +2,7 @@ name: Playwright Tests
 on:
   workflow_dispatch:
   schedule:
-    - cron: "01,31 * * * *"
+    - cron: "07,37 * * * *"
 
 # Prevents two runs from being logged into the same game account at once if
 # a run takes close to the full 30-minute cadence between scheduled
