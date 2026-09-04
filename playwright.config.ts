@@ -28,7 +28,15 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
-    screenshot: 'only-on-failure'
+    screenshot: 'only-on-failure',
+
+    /* Cap how long any single action (click, fill, isVisible, etc.) will
+     * wait for its target before failing. Without this, an action on a
+     * locator that never becomes actionable silently retries for up to the
+     * whole test's timeout (20 minutes) with no error and no log output -
+     * this makes a genuine hang fail fast with a clear "waiting for
+     * locator X" message instead. */
+    actionTimeout: 30_000,
   },
 
   /* Configure projects for major browsers */
