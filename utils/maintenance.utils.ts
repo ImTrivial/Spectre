@@ -41,9 +41,12 @@ export class MaintenanceUtils {
             }
         }
 
-        if(clicked) {
-            await this.page.getByRole('button', { name: 'Plan bulk check' }).click();
-        }
+        // Always submit/close this screen, whether or not anything was
+        // checked - otherwise the "Plan bulk check" button stays in the DOM
+        // and collides with the " Plan" menu button repairPlanes() clicks
+        // next (Playwright's role-name matching is substring-based, so
+        // "Plan bulk check" also matches a query for " Plan").
+        await this.page.getByRole('button', { name: 'Plan bulk check' }).click();
 
         return clicked;
     }
