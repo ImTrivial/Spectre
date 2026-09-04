@@ -8,20 +8,22 @@ export class MaintenanceUtils {
         this.page = page;
     }
 
-    public async repairPlanes() {
-        await this.page.getByRole('button', { name: ' Plan' }).click();
-        await this.page.getByRole('button', { name: ' Bulk repair' }).click();
+    public async repairPlanes(): Promise<boolean> {
+        await this.page.getByRole('button', { name: ' Plan' }).click();
+        await this.page.getByRole('button', { name: ' Bulk repair' }).click();
         await this.page.locator('#repairPct').selectOption('60');
         await GeneralUtils.sleep(1000);
         const noPlaneExists = await this.page.getByText('There are no aircraft worn to').isVisible();
         if(!noPlaneExists) {
             await this.page.getByRole('button', { name: 'Plan bulk repair' }).click();
+            return true;
         }
+        return false;
     }
 
-    public async checkPlanes() {
-        await this.page.getByRole('button', { name: ' Plan' }).click();
-        await this.page.getByRole('button', { name: ' Bulk check' }).click();
+    public async checkPlanes(): Promise<boolean> {
+        await this.page.getByRole('button', { name: ' Plan' }).click();
+        await this.page.getByRole('button', { name: ' Bulk check' }).click();
 
         await GeneralUtils.sleep(2000);
         let clicked = false;
@@ -29,12 +31,10 @@ export class MaintenanceUtils {
         // Click only planes with danger text
         const dangerChecksExits = await this.page.locator('.bg-white > .text-danger').first().isVisible();
         if(dangerChecksExits) {
-            const allCheckHoursDanger = await this.page.locator('.bg-white > .text-danger');
-            let count = await allCheckHoursDanger.count();        
+            const allCheckHoursDanger = this.page.locator('.bg-white > .text-danger');
+            const count = await allCheckHoursDanger.count();
             for(let i = 0; i < count; i++) {
-                const element = await allCheckHoursDanger.first();
-
-                await element.click();
+                await allCheckHoursDanger.first().click();
                 clicked = true;
 
                 await GeneralUtils.sleep(500);
@@ -44,5 +44,7 @@ export class MaintenanceUtils {
         if(clicked) {
             await this.page.getByRole('button', { name: 'Plan bulk check' }).click();
         }
+
+        return clicked;
     }
 }
