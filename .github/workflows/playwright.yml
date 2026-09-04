@@ -1,18 +1,24 @@
 name: Playwright Tests
-
 on:
   workflow_dispatch:
-
-  push:
-    branches:
-      - main
-
   schedule:
-    - cron: "17,47 * * * *"
-    
+    - cron: "01,31 * * * *"
+
+# Prevents two runs from being logged into the same game account at once if
+# a run takes close to the full 30-minute cadence between scheduled
+# triggers - queues the next run instead of letting them overlap.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   test:
-    timeout-minutes: 15 
+    # Must stay above the Playwright test's own timeout (currently 20
+    # minutes, set via test.setTimeout in airlineManager.spec.ts) plus
+    # setup/install time - otherwise GitHub Actions hard-kills the whole
+    # job before Playwright's timeout or the test's own try/finally cleanup
+    # (Discord failure notification, page.close()) ever gets to run.
+    timeout-minutes: 25
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
@@ -54,7 +60,7 @@ jobs:
         echo "INCREASE_AIRLINE_REPUTATION=${{ vars.INCREASE_AIRLINE_REPUTATION }}" >> .env
         echo "CAMPAIGN_TYPE=${{ vars.CAMPAIGN_TYPE }}" >> .env
         echo "CAMPAIGN_DURATION=${{ vars.CAMPAIGN_DURATION }}" >> .env
+        echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> .env
 
     - name: Run Playwright tests
       run: npx playwright test
-      
