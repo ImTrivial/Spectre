@@ -9,6 +9,10 @@ export class ConfigUtils {
         return value;
     }
 
+    public static optionalString(name: string): string | undefined {
+        return process.env[name] || undefined;
+    }
+
     public static requireNumber(name: string): number {
         const value = this.requireString(name);
         const parsedValue = Number.parseInt(value, 10);
