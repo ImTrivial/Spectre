@@ -38,4 +38,4 @@ export class GeneralUtils {
     public async closePopup() {
         await this.page.locator('#popup .modal-header .glyphicons').click();
     }
-}}
+}
