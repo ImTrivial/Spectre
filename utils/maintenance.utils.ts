@@ -40,21 +40,15 @@ export class MaintenanceUtils {
                 await GeneralUtils.sleep(500);
             }
 
-            // Only submit when something was actually selected - submitting
-            // with zero selections appears to trigger an empty-state banner
-            // that visually covers this button, which then blocks every
-            // future click attempt on it until the page timeout.
+            // "Plan bulk check" sits in the DOM the whole time this tab is
+            // open, whether or not anything's selected - it only goes away
+            // once actually submitted. We only submit when something was
+            // selected; the caller is responsible for fully closing and
+            // reopening the maintenance popup afterward so this tab's state
+            // (and this button) doesn't linger into the next screen.
             await this.page.getByRole('button', { name: 'Plan bulk check' }).click();
             await GeneralUtils.sleep(500);
         }
-
-        // Re-open the "Plan" menu to back out of the Bulk check subview,
-        // whether or not we submitted. This resets the screen so the
-        // "Plan bulk check" button isn't left sitting in the DOM to collide
-        // with repairPlanes()'s click on " Plan" right after (Playwright's
-        // role-name matching is substring-based, so "Plan bulk check" also
-        // matches a query for " Plan").
-        await this.page.getByRole('button', { name: ' Plan' }).click();
 
         return clicked;
     }
