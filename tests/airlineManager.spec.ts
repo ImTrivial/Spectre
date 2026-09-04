@@ -87,11 +87,24 @@ test('All Operations', async ({ page }) => {
     await departSweep();
     // End //
 
-    // Repair Planes if needed //
+    // Check Planes //
     await page.locator('div:nth-child(4) > #mapMaint > img').click();
+    await GeneralUtils.sleep(1000);
 
     stats.planesChecked = await maintenanceUtils.checkPlanes();
+
+    await generalUtils.closePopup();
+    await GeneralUtils.sleep(500);
+    // End //
+
+    // Repair Planes if needed //
+    // Reopens the maintenance popup fresh rather than reusing the one above
+    // - closing and reopening resets the panel to its default tab, so
+    // nothing left over from the check step (e.g. a still-visible "Plan
+    // bulk check" button) can collide with the " Plan" button clicked here.
+    await page.locator('div:nth-child(4) > #mapMaint > img').click();
     await GeneralUtils.sleep(1000);
+
     stats.planesRepaired = await maintenanceUtils.repairPlanes();
     await GeneralUtils.sleep(1000);
 
