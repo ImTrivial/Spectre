@@ -44,7 +44,15 @@ export class CampaignUtils {
         const isAirlineReputationExists = await this.page.getByRole('cell', { name: ' Airline reputation' }).isVisible();
         if (!isAirlineReputationExists) {
             await this.page.getByRole('button', { name: ' New campaign' }).click();
-            await this.page.getByRole('cell', { name: 'Increase airline reputation' }).click();
+
+            // This campaign list table appears to re-render continuously
+            // (likely a live-updating timer/status column), which can swap
+            // out the row Playwright just validated a split second before
+            // the click lands - hence force: true, which still clicks the
+            // same on-screen coordinates rather than re-checking for an
+            // overlap that's really just the table's own next refresh.
+            await this.page.getByRole('cell', { name: 'Increase airline reputation' }).click({ force: true });
+
             await this.page.locator('#dSelector').selectOption(durationOption);
             await this.page.locator(`tr:has(td:has-text("Campaign ${campaignType}")) .btn-danger`).click();
 
@@ -62,6 +70,12 @@ export class CampaignUtils {
         await GeneralUtils.sleep(1000);
 
         const ecoFriendlyCreated = await this.createEcoFriendly();
+
+        // Give the page a moment to close out the eco-friendly campaign's
+        // own dialog/table before opening a second "New campaign" flow for
+        // reputation - reduces the odds of the two sharing/colliding on the
+        // marketing screen's live-updating campaign list.
+        await GeneralUtils.sleep(1500);
 
         let reputationCreated = false;
         if(this.increaseAirlineReputation) {
