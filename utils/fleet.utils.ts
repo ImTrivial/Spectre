@@ -3,14 +3,20 @@ import { GeneralUtils } from "./general.utils";
 
 require('dotenv').config();
 
+export interface DepartResult {
+    // Number of "depart 20-or-less" batches actually clicked this call.
+    batches: number;
+    // true if the queue was genuinely empty (or hit the "unable to depart"
+    // wall) when this call stopped - false if it stopped only because it
+    // hit maxBatches, meaning there may still be more planes to depart.
+    exhausted: boolean;
+}
+
 export class FleetUtils {
     page : Page;
 
-    // Not a normal operating limit — 20 planes depart per click, so a large
-    // fleet (thousands of planes) can legitimately need hundreds of loops.
-    // This only exists as a last-resort guard against a genuine infinite
-    // loop (e.g. the page state getting stuck) rather than as a cap on how
-    // many planes get departed.
+    // Used only when no maxBatches is passed in - a last-resort guard
+    // against a genuine infinite loop, not a normal operating limit.
     private static readonly SAFETY_MAX_ITERATIONS = 1000;
 
     constructor(page : Page) {
@@ -18,20 +24,24 @@ export class FleetUtils {
     }
 
     /**
-     * Returns the number of "depart 20-or-less" batches actually clicked
-     * this call, so callers can report roughly how many planes went out
-     * (batches * up to 20 - this counts clicks, not confirmed departures,
-     * since the page doesn't expose an exact per-click count).
+     * Departs planes in batches of 20-or-less until either the queue is
+     * empty, the game reports it can't depart further (e.g. no fuel/crew),
+     * or maxBatches is reached (whichever comes first). Pass a small
+     * maxBatches (e.g. 5 = ~100 planes) to cap how long a single call can
+     * run, so one pass can't consume an entire test run on a huge or
+     * continuously-refilling fleet.
      */
-    public async departPlanes(): Promise<number> {
+    public async departPlanes(maxBatches?: number): Promise<DepartResult> {
+        const cap = maxBatches ?? FleetUtils.SAFETY_MAX_ITERATIONS;
+
         let departAllVisible = await this.page.locator('#departAll').isVisible();
         console.log('Looking if there are any planes to be departed...')
 
         let count = 0;
         while(departAllVisible) {
-            if (count >= FleetUtils.SAFETY_MAX_ITERATIONS) {
-                console.warn(`Hit safety limit of ${FleetUtils.SAFETY_MAX_ITERATIONS} depart iterations - stopping to avoid an infinite loop. If you have a fleet this large, raise SAFETY_MAX_ITERATIONS.`);
-                break;
+            if (count >= cap) {
+                console.log(`Reached this pass's batch cap (${cap}) - stopping here, there may be more to depart.`);
+                return { batches: count, exhausted: false };
             }
 
             console.log('Departing 20 or less...');
@@ -42,8 +52,9 @@ export class FleetUtils {
             await GeneralUtils.sleep(1500);
 
             const cantDepartPlane = await this.page.getByText('×Unable to departSome A/C was').isVisible();
-            if(cantDepartPlane)
-                break;
+            if(cantDepartPlane) {
+                return { batches: count, exhausted: true };
+            }
 
             departAllVisible = await this.page.locator('#departAll').isVisible();
             count++;
@@ -51,6 +62,6 @@ export class FleetUtils {
             console.log('Departed 20 or less planes...')
         }
 
-        return count;
+        return { batches: count, exhausted: true };
     }
 }
