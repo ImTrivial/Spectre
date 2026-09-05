@@ -8,11 +8,20 @@ import { DiscordUtils, RunStats } from '../utils/discord.utils';
 
 require('dotenv').config();
 
+// Each depart pass is capped at this many "20-or-less" batches (~100 planes
+// at 5 batches), so a single pass can never consume the whole test budget
+// on a huge or continuously-refilling fleet. The depart/fuel cycle below
+// repeats up to MAX_DEPART_FUEL_CYCLES times, buying fuel between each
+// batch of departures, and stops early once there's genuinely nothing left
+// to depart.
+const DEPART_BATCH_CAP = 5;
+const MAX_DEPART_FUEL_CYCLES = 5;
+
 test('All Operations', async ({ page }) => {
-  // Large fleets can need hundreds of depart-loop iterations (20 planes per
-  // click, ~1.5s per click), across 3 sweeps in this run. 20 minutes gives
-  // headroom for a several-thousand-plane airline; tune down if your fleet
-  // is small and you'd rather fail fast.
+  // Large fleets can need many depart-loop iterations (20 planes per click,
+  // ~1.5s per click). 20 minutes gives headroom for a several-thousand
+  // plane airline across the whole run; tune down if your fleet is small
+  // and you'd rather fail fast.
   test.setTimeout(20 * 60 * 1000);
 
   // Variable Initialization
@@ -37,17 +46,35 @@ test('All Operations', async ({ page }) => {
     durationMs: 0,
   };
 
-  // Opens the routes screen, departs everything currently ready, then closes
-  // the popup again. Called at several points below so planes that finish
-  // loading/refueling partway through the run still get departed, rather
-  // than only catching whatever's ready at the very end.
-  const departSweep = async () => {
+  // Opens the routes screen, departs up to DEPART_BATCH_CAP batches, then
+  // closes the popup again. Returns the DepartResult so the caller knows
+  // whether the queue actually ran dry or just hit the cap.
+  const departPass = async () => {
     console.log('Sweeping routes screen for planes to depart...');
 
     await page.locator('#mapRoutes').getByRole('img').click();
     await GeneralUtils.sleep(2500);
 
-    stats.departBatches += await fleetUtils.departPlanes();
+    const result = await fleetUtils.departPlanes(DEPART_BATCH_CAP);
+    stats.departBatches += result.batches;
+
+    await generalUtils.closePopup();
+    await GeneralUtils.sleep(500);
+
+    return result;
+  };
+
+  // Opens the fuel screen and tops up both fuel and CO2, keeping whatever
+  // was actually bought last (a cycle where nothing gets bought - because
+  // price was over the max threshold - shouldn't erase a previous cycle's
+  // purchase in the stats).
+  const buyFuelAndCo2 = async () => {
+    await page.locator('#mapMaint > img').first().click();
+    stats.fuelBought = (await fuelUtils.buyFuel()) ?? stats.fuelBought;
+
+    await page.getByRole('button', { name: ' Co2' }).click();
+    await GeneralUtils.sleep(1000);
+    stats.co2Bought = (await fuelUtils.buyCo2()) ?? stats.co2Bought;
 
     await generalUtils.closePopup();
     await GeneralUtils.sleep(500);
@@ -58,19 +85,31 @@ test('All Operations', async ({ page }) => {
     await generalUtils.login(page);
     // End //
 
-    // Depart Planes Operations (early pass) //
-    await departSweep();
-    // End //
+    // Depart / Fuel Cycle //
+    // Alternates departing a batch of planes with topping up fuel/CO2, so a
+    // huge fleet gets fuel refilled partway through instead of the bot
+    // trying (and potentially running out of budget) to depart everything
+    // in one pass before ever buying more fuel.
+    for (let cycle = 1; cycle <= MAX_DEPART_FUEL_CYCLES; cycle++) {
+      console.log(`Depart/fuel cycle ${cycle}/${MAX_DEPART_FUEL_CYCLES}...`);
 
-    // Fuel Operations //
-    await page.locator('#mapMaint > img').first().click();
-    stats.fuelBought = await fuelUtils.buyFuel();
+      const departResult = await departPass();
 
-    await page.getByRole('button', { name: ' Co2' }).click();
-    await GeneralUtils.sleep(1000);
-    stats.co2Bought = await fuelUtils.buyCo2();
+      if (departResult.exhausted && departResult.batches === 0) {
+        // Nothing was waiting to depart at all this cycle - no need to top
+        // up fuel for flights that don't exist, and no point cycling further.
+        console.log('Nothing left to depart - ending the depart/fuel cycle early.');
+        break;
+      }
 
-    await generalUtils.closePopup();
+      await buyFuelAndCo2();
+
+      if (departResult.exhausted) {
+        // We departed everything that was ready - stop cycling.
+        console.log('Depart queue is empty - ending the depart/fuel cycle early.');
+        break;
+      }
+    }
     // End //
 
     // Campaign Operations //
@@ -81,10 +120,6 @@ test('All Operations', async ({ page }) => {
 
     await generalUtils.closePopup();
     await GeneralUtils.sleep(1000)
-    // End //
-
-    // Depart Planes Operations (mid-run pass) //
-    await departSweep();
     // End //
 
     // Check Planes //
@@ -112,7 +147,10 @@ test('All Operations', async ({ page }) => {
     // End //
 
     // Depart Planes Operations (final pass) //
-    await departSweep();
+    // A single capped pass to catch anything freed up by maintenance
+    // (e.g. a plane that was stuck under repair). Capped the same way as
+    // the earlier cycle so this can't run away either.
+    await departPass();
     // End //
 
     stats.durationMs = Date.now() - startTime;
